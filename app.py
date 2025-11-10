@@ -4,7 +4,7 @@ import itertools
 import collections
 import time
 
-st.title("🎯 Lottery Deep Search — 4 Digit (0-9) Engine")
+st.title("🎯 repeate all — 4 Digit (0-9) Engine")
 
 st.write("""
 Upload an Excel file with two columns:  
