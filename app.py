@@ -1,16 +1,19 @@
 import streamlit as st
 import pandas as pd
-from collections import Counter
 from itertools import product
+from collections import Counter
 
 st.set_page_config(page_title="Lottery Optimizer", layout="wide")
 
-st.title("🎯 4-Digit Lottery Lowest Payout Optimizer")
+st.title("🎯 4-Digit Lottery - Absolute Lowest Payout Finder")
 
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
 if uploaded_file:
 
+    # -----------------------------
+    # Load & Clean Data
+    # -----------------------------
     df = pd.read_excel(uploaded_file)
 
     st.write("Original Columns:", df.columns.tolist())
@@ -28,118 +31,113 @@ if uploaded_file:
 
     st.success("File processed successfully!")
 
-    # ---------------- Reward Rules ----------------
+    # -----------------------------
+    # Force Global Minimum Button
+    # -----------------------------
+    if st.button("🚀 Force Absolute Lowest Result"):
 
-    def straight_reward(m):
-        return 18500 if m == 4 else 0
+        # Pre-group tickets (faster)
+        straight_tickets = []
+        chance_tickets = []
+        rumble_counters = []
 
-    def rumble_reward(m):
-        if m == 3:
-            return 50
-        if m == 4:
-            return 1750
-        return 0
+        for _, row in df.iterrows():
+            digits = row["Digits"]
+            category = str(row["Category"]).strip().lower()
 
-    def chance_reward(m):
-        if m == 1:
-            return 15
-        if m == 2:
-            return 100
-        if m == 3:
-            return 1100
-        if m == 4:
-            return 7500
-        return 0
-
-    # ---------------- Matching Logic ----------------
-
-    def straight_match(a, b):
-        count = 0
-        for i in range(4):
-            if a[i] == b[i]:
-                count += 1
-            else:
-                break
-        return count
-
-    def chance_match(a, b):
-        count = 0
-        for i in range(3, -1, -1):
-            if a[i] == b[i]:
-                count += 1
-            else:
-                break
-        return count
-
-    def rumble_match(a, b):
-        ca = Counter(a)
-        cb = Counter(b)
-        return sum((ca & cb).values())
-
-    # ---------------- Run Optimization ----------------
-
-    if st.button("🚀 Run Optimization"):
+            if category == "straight":
+                straight_tickets.append(digits)
+            elif category == "chance":
+                chance_tickets.append(digits)
+            elif category == "rumble":
+                rumble_counters.append(Counter(digits))
 
         best_combo = None
         lowest_payout = float("inf")
-        best_straight = 0
-        best_rumble = 0
-        best_chance = 0
 
         progress_bar = st.progress(0)
         total_combos = 10000
         checked = 0
 
+        # -----------------------------
+        # Search All 0000–9999
+        # -----------------------------
         for combo in product(range(10), repeat=4):
 
             total_payout = 0
-            straight_total = 0
-            rumble_total = 0
-            chance_total = 0
 
-            for _, row in df.iterrows():
-                ticket = row["Digits"]
-                category = str(row["Category"]).strip().lower()
+            # 1️⃣ STRAIGHT (Highest risk first - 18500)
+            for ticket in straight_tickets:
+                match = 0
+                for i in range(4):
+                    if combo[i] == ticket[i]:
+                        match += 1
+                    else:
+                        break
 
-                if category == "straight":
-                    m = straight_match(combo, ticket)
-                    reward = straight_reward(m)
-                    straight_total += reward
+                if match == 4:
+                    total_payout += 18500
+                    break  # Immediate prune
 
-                elif category == "rumble":
-                    m = rumble_match(combo, ticket)
-                    reward = rumble_reward(m)
-                    rumble_total += reward
+            if total_payout >= lowest_payout:
+                checked += 1
+                continue
 
-                elif category == "chance":
-                    m = chance_match(combo, ticket)
-                    reward = chance_reward(m)
-                    chance_total += reward
+            # 2️⃣ CHANCE (Second highest risk - 7500)
+            for ticket in chance_tickets:
+                match = 0
+                for i in range(3, -1, -1):
+                    if combo[i] == ticket[i]:
+                        match += 1
+                    else:
+                        break
 
-                else:
-                    continue
+                if match == 1:
+                    total_payout += 15
+                elif match == 2:
+                    total_payout += 100
+                elif match == 3:
+                    total_payout += 1100
+                elif match == 4:
+                    total_payout += 7500
 
-                total_payout += reward
-
-                # Early pruning
-                if total_payout > lowest_payout:
+                if total_payout >= lowest_payout:
                     break
 
+            if total_payout >= lowest_payout:
+                checked += 1
+                continue
+
+            # 3️⃣ RUMBLE
+            combo_counter = Counter(combo)
+
+            for rc in rumble_counters:
+                matches = sum((combo_counter & rc).values())
+
+                if matches == 3:
+                    total_payout += 50
+                elif matches == 4:
+                    total_payout += 1750
+
+                if total_payout >= lowest_payout:
+                    break
+
+            # Update best result
             if total_payout < lowest_payout:
                 lowest_payout = total_payout
                 best_combo = combo
-                best_straight = straight_total
-                best_rumble = rumble_total
-                best_chance = chance_total
 
             checked += 1
-            progress_bar.progress(checked / total_combos)
+            if checked % 200 == 0:
+                progress_bar.progress(checked / total_combos)
 
-        st.success("Optimization Completed!")
+        progress_bar.progress(1.0)
 
-        st.subheader("🏆 Best Combination Found")
+        # -----------------------------
+        # Display Result
+        # -----------------------------
+        st.success("✅ Absolute Global Minimum Found!")
+
+        st.subheader("🏆 Best Combination")
         st.write("Combination:", ",".join(map(str, best_combo)))
         st.write("Total Payout:", lowest_payout)
-        st.write("Straight Payout:", best_straight)
-        st.write("Rumble Payout:", best_rumble)
-        st.write("Chance Payout:", best_chance)
