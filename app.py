@@ -6,53 +6,56 @@ import heapq
 
 st.set_page_config(page_title="Lottery Optimizer", layout="wide")
 
-st.title("🎯 4-Digit Lottery - Lowest & Highest 10 Payout Finder")
+st.title("🎯 4-Digit Lottery - Duplicate Aware Optimizer")
 
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
 if uploaded_file:
 
     # -----------------------------
-    # Load & Clean Data
+    # Load Data
     # -----------------------------
     df = pd.read_excel(uploaded_file)
-
     df = df.iloc[:, :2]
     df.columns = ["Ticket", "Category"]
     df = df.dropna()
 
     def parse_ticket(t):
-        return [int(x.strip()) for x in str(t).split(",")]
+        return tuple(int(x.strip()) for x in str(t).split(","))
 
     df["Digits"] = df["Ticket"].apply(parse_ticket)
 
-    st.success("File processed successfully!")
+    st.success("File loaded successfully!")
 
-    if st.button("🚀 Run Full Search (0000–9999)"):
+    # -----------------------------
+    # GROUP DUPLICATE TICKETS
+    # -----------------------------
+    grouped = df.groupby(["Digits", "Category"]).size().reset_index(name="Count")
 
-        # -----------------------------
-        # Pre-group tickets (FASTER)
-        # -----------------------------
-        straight_tickets = []
-        chance_tickets = []
-        rumble_counters = []
+    straight_tickets = []
+    chance_tickets = []
+    rumble_tickets = []
 
-        for _, row in df.iterrows():
-            digits = row["Digits"]
-            category = str(row["Category"]).strip().lower()
+    for _, row in grouped.iterrows():
+        digits = row["Digits"]
+        category = str(row["Category"]).strip().lower()
+        count = row["Count"]
 
-            if category == "straight":
-                straight_tickets.append(digits)
-            elif category == "chance":
-                chance_tickets.append(digits)
-            elif category == "rumble":
-                rumble_counters.append(Counter(digits))
+        if category == "straight":
+            straight_tickets.append((digits, count))
 
-        # -----------------------------
-        # Keep Only Top 10 Lowest & Highest
-        # -----------------------------
-        lowest_heap = []   # Max heap (store negative)
-        highest_heap = []  # Min heap
+        elif category == "chance":
+            chance_tickets.append((digits, count))
+
+        elif category == "rumble":
+            rumble_tickets.append((Counter(digits), count))
+
+    st.write("Unique Tickets After Grouping:", len(grouped))
+
+    if st.button("🚀 Run Full Search (Duplicate Aware)"):
+
+        lowest_heap = []
+        highest_heap = []
 
         progress_bar = st.progress(0)
         total_combos = 10000
@@ -62,8 +65,10 @@ if uploaded_file:
 
             total_payout = 0
 
-            # Straight
-            for ticket in straight_tickets:
+            # -----------------
+            # STRAIGHT
+            # -----------------
+            for ticket, count in straight_tickets:
                 match = 0
                 for i in range(4):
                     if combo[i] == ticket[i]:
@@ -71,10 +76,12 @@ if uploaded_file:
                     else:
                         break
                 if match == 4:
-                    total_payout += 18500
+                    total_payout += 18500 * count
 
-            # Chance
-            for ticket in chance_tickets:
+            # -----------------
+            # CHANCE
+            # -----------------
+            for ticket, count in chance_tickets:
                 match = 0
                 for i in range(3, -1, -1):
                     if combo[i] == ticket[i]:
@@ -83,26 +90,29 @@ if uploaded_file:
                         break
 
                 if match == 1:
-                    total_payout += 15
+                    total_payout += 15 * count
                 elif match == 2:
-                    total_payout += 100
+                    total_payout += 100 * count
                 elif match == 3:
-                    total_payout += 1100
+                    total_payout += 1100 * count
                 elif match == 4:
-                    total_payout += 7500
+                    total_payout += 7500 * count
 
-            # Rumble
+            # -----------------
+            # RUMBLE
+            # -----------------
             combo_counter = Counter(combo)
-            for rc in rumble_counters:
+            for rc, count in rumble_tickets:
                 matches = sum((combo_counter & rc).values())
+
                 if matches == 3:
-                    total_payout += 50
+                    total_payout += 50 * count
                 elif matches == 4:
-                    total_payout += 1750
+                    total_payout += 1750 * count
 
             result = (total_payout, ",".join(map(str, combo)))
 
-            # Maintain Lowest 10
+            # Lowest 10
             if len(lowest_heap) < 10:
                 heapq.heappush(lowest_heap, (-total_payout, result))
             else:
@@ -110,7 +120,7 @@ if uploaded_file:
                     heapq.heappop(lowest_heap)
                     heapq.heappush(lowest_heap, (-total_payout, result))
 
-            # Maintain Highest 10
+            # Highest 10
             if len(highest_heap) < 10:
                 heapq.heappush(highest_heap, result)
             else:
@@ -124,9 +134,6 @@ if uploaded_file:
 
         progress_bar.progress(1.0)
 
-        # -----------------------------
-        # Sort Results
-        # -----------------------------
         lowest_results = sorted([r[1] for r in lowest_heap], key=lambda x: x[0])
         highest_results = sorted(highest_heap, key=lambda x: -x[0])
 
