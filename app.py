@@ -1,77 +1,145 @@
 import streamlit as st
 import pandas as pd
-import itertools
-import collections
-import time
+from collections import Counter
+from itertools import product
 
-st.title("🎯 repeate all — 4 Digit (0-9) Engine")
+st.set_page_config(page_title="Lottery Optimizer", layout="wide")
 
-st.write("""
-Upload an Excel file with two columns:  
-**Column A = Ticket (comma-separated digits)**  
-**Column B = Category (Straight / Rumble / Chance)**  
-Example ticket: `1,2,3,4`
-""")
+st.title("🎯 4-Digit Lottery Lowest Payout Optimizer")
 
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file, header=None).iloc[1:]
-    df = df[[0,1]].rename(columns={0:'ticket',1:'category'})
-    df['ticket'] = df['ticket'].astype(str).str.strip()
 
-    tickets = []
-    cats = df['category'].tolist()
+    df = pd.read_excel(uploaded_file)
 
-    for s in df['ticket'].tolist():
-        parts = [int(x) for x in s.split(',')]
-        tickets.append(parts)
+    st.write("Original Columns:", df.columns.tolist())
+    st.write("Original Shape:", df.shape)
 
-    straight_counts = collections.Counter()
-    rumble_counts = collections.Counter()
-    chance_counts = collections.Counter()
+    # Keep first 2 columns only
+    df = df.iloc[:, :2]
+    df.columns = ["Ticket", "Category"]
+    df = df.dropna()
 
-    for t,c in zip(tickets,cats):
-        tup = tuple(t)
-        if c=='Straight':
-            straight_counts[tup] += 1
-        elif c=='Rumble':
-            rumble_counts[tuple(sorted(t))] += 1
-        else:
-            chance_counts[tup] += 1
+    def parse_ticket(t):
+        return [int(x.strip()) for x in str(t).split(",")]
 
-    rumble_patterns = [(collections.Counter(k), cnt) for k,cnt in rumble_counts.items()]
+    df["Digits"] = df["Ticket"].apply(parse_ticket)
 
-    chance_suffix_counts = {1:collections.Counter(), 2:collections.Counter(),
-                            3:collections.Counter(), 4:collections.Counter()}
+    st.success("File processed successfully!")
 
-    for t,cnt in chance_counts.items():
-        for L in range(1,5):
-            chance_suffix_counts[L][tuple(t[-L:])] += cnt
+    # ---------------- Reward Rules ----------------
 
-    chance_payout_map = {1:15,2:100,3:1100,4:7500}
+    def straight_reward(m):
+        return 18500 if m == 4 else 0
 
-    def evaluate_draw(draw):
-        draw_tuple = tuple(draw)
-        total = 0
+    def rumble_reward(m):
+        if m == 3:
+            return 50
+        if m == 4:
+            return 1750
+        return 0
 
-        total += straight_counts.get(draw_tuple, 0) * 18500
+    def chance_reward(m):
+        if m == 1:
+            return 15
+        if m == 2:
+            return 100
+        if m == 3:
+            return 1100
+        if m == 4:
+            return 7500
+        return 0
 
-        draw_cnt = collections.Counter(draw)
-        for tcnt, cnt in rumble_patterns:
-            md = sum(min(draw_cnt.get(d,0), tcnt.get(d,0)) for d in draw_cnt)
-            if md == 4:
-                total += 1750 * cnt
-            elif md == 3:
-                total += 250 * cnt
+    # ---------------- Matching Logic ----------------
 
-        c4 = chance_suffix_counts[4].get(draw_tuple, 0)
-        total += c4 * chance_payout_map[4]
+    def straight_match(a, b):
+        count = 0
+        for i in range(4):
+            if a[i] == b[i]:
+                count += 1
+            else:
+                break
+        return count
 
-        s3 = tuple(draw[-3:])
-        c3 = chance_suffix_counts[3].get(s3, 0) - c4
-        if c3 > 0:
-            total += c3 * chance_payout_map[3]
+    def chance_match(a, b):
+        count = 0
+        for i in range(3, -1, -1):
+            if a[i] == b[i]:
+                count += 1
+            else:
+                break
+        return count
 
-        s2 = tuple(draw[-2:])
-        c2 = chance_suffix_counts[2].get(s2, 0) - chance_suffix_count
+    def rumble_match(a, b):
+        ca = Counter(a)
+        cb = Counter(b)
+        return sum((ca & cb).values())
+
+    # ---------------- Run Optimization ----------------
+
+    if st.button("🚀 Run Optimization"):
+
+        best_combo = None
+        lowest_payout = float("inf")
+        best_straight = 0
+        best_rumble = 0
+        best_chance = 0
+
+        progress_bar = st.progress(0)
+        total_combos = 10000
+        checked = 0
+
+        for combo in product(range(10), repeat=4):
+
+            total_payout = 0
+            straight_total = 0
+            rumble_total = 0
+            chance_total = 0
+
+            for _, row in df.iterrows():
+                ticket = row["Digits"]
+                category = str(row["Category"]).strip().lower()
+
+                if category == "straight":
+                    m = straight_match(combo, ticket)
+                    reward = straight_reward(m)
+                    straight_total += reward
+
+                elif category == "rumble":
+                    m = rumble_match(combo, ticket)
+                    reward = rumble_reward(m)
+                    rumble_total += reward
+
+                elif category == "chance":
+                    m = chance_match(combo, ticket)
+                    reward = chance_reward(m)
+                    chance_total += reward
+
+                else:
+                    continue
+
+                total_payout += reward
+
+                # Early pruning
+                if total_payout > lowest_payout:
+                    break
+
+            if total_payout < lowest_payout:
+                lowest_payout = total_payout
+                best_combo = combo
+                best_straight = straight_total
+                best_rumble = rumble_total
+                best_chance = chance_total
+
+            checked += 1
+            progress_bar.progress(checked / total_combos)
+
+        st.success("Optimization Completed!")
+
+        st.subheader("🏆 Best Combination Found")
+        st.write("Combination:", ",".join(map(str, best_combo)))
+        st.write("Total Payout:", lowest_payout)
+        st.write("Straight Payout:", best_straight)
+        st.write("Rumble Payout:", best_rumble)
+        st.write("Chance Payout:", best_chance)
